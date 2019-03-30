@@ -1,5 +1,10 @@
+import base64
 import logging
+import json
+import re
 import time
+import sys
+
 from io import BytesIO
 from urllib.parse import urljoin
 
@@ -10,7 +15,13 @@ from PIL import Image
 
 from flask import Flask, send_file
 
+from popular.icons import POPULAR_ICONS
+
+
 app = Flask(__name__)
+
+logging.basicConfig()
+logging.getLogger().setLevel(logging.INFO)
 
 
 @app.route("/")
@@ -20,8 +31,15 @@ def home():
 
 @app.route("/api/<string:domain>/32.png")
 def metaicon(domain):
+    if not is_valid_hostname(domain):
+        logging.info(f"Request for invalid hostname: {domain}")
+        return ("Invalid hostname", 400)
+
     try:
-        b = get_icon(domain)
+        b = get_popular_icon(domain)
+
+        if not b:
+            b = get_icon(domain)
 
         if b:
             b.seek(0)
@@ -30,6 +48,17 @@ def metaicon(domain):
         logging.warn(e)
 
     return ("Not found", 404)
+
+
+def get_popular_icon(domain):
+    result = POPULAR_ICONS.get(domain)
+
+    if not result:
+        result = POPULAR_ICONS.get('www.' + domain)
+
+    if result:
+        logging.info(f'Cache hit for domain: {domain}')
+        return BytesIO(base64.b64decode(result))
 
 
 def get_icon(domain):
@@ -41,16 +70,22 @@ def get_icon(domain):
         headers={
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.14; rv:65.0) Gecko/20100101 Firefox/65.0"
         },
+        timeout=2,
     )
     html = BeautifulSoup(response.content, features="html.parser")
 
     logging.info(f"Content received {time.time() - start}")
-    icons = [
-        icon
-        for icon in html.find_all("link")
-        if any([x in [y.lower() for y in icon.attrs.get("rel", [])] for x in ["icon"]])
-    ]
-    logging.info(f"{icons} {time.time() - start}")
+
+    icons = []
+    for icon in html.find_all("link"):
+        rel = icon.attrs.get("rel", [])
+        rel = [x.lower() for x in rel]
+
+        if any([x in rel for x in ["icon", "apple-touch-icon"]]):
+            href = icon.attrs.get("href")
+            if not href or href.endswith(".svg"):
+                continue
+            icons.append(icon)
 
     if not icons:
         favicon_url = urljoin(response.url, "favicon.ico")
@@ -79,7 +114,11 @@ def get_icon(domain):
     return b
 
 
-if __name__ == "__main__":
-    logging.basicConfig()
-    logging.getLogger().setLevel(logging.INFO)
-    get_icon("ipinfo.io")
+def is_valid_hostname(hostname):
+    if len(hostname) > 255:
+        return False
+    if hostname[-1] == ".":
+        hostname = hostname[:-1]  # strip exactly one dot from the right, if present
+    allowed = re.compile("(?!-)[A-Z\d-]{1,63}(?<!-)$", re.IGNORECASE)
+    return all(allowed.match(x) for x in hostname.split("."))
+

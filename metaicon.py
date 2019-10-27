@@ -4,6 +4,7 @@ import json
 import re
 import time
 import sys
+import hashlib
 
 from io import BytesIO
 from urllib.parse import urljoin
@@ -11,7 +12,7 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from flask import Flask, send_file
 
@@ -23,6 +24,14 @@ app = Flask(__name__)
 logging.basicConfig()
 logging.getLogger().setLevel(logging.INFO)
 
+def get(url):
+    return requests.get(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.14; rv:65.0) Gecko/20100101 Firefox/65.0"
+        },
+        timeout=2,
+    )
 
 @app.route("/")
 def home():
@@ -46,9 +55,24 @@ def metaicon(domain):
             return send_file(b, mimetype="image/png")
     except Exception as e:
         logging.warn(e)
+        b = get_default_image(domain)
+        return send_file(b, mimetype="image/png")
 
-    return ("Not found", 404)
 
+def get_default_image(domain):
+    logging.info('Using "default" image for', domain)
+    m = hashlib.sha256()
+    m.update(domain.encode())
+    colour = m.hexdigest()[:6]
+
+    i = Image.new('RGB', (32, 32))
+    d = ImageDraw.Draw(i)
+    d.rectangle([0, 0, 32, 32], f'#{colour}', f'#{colour}')
+
+    b = BytesIO()
+    i.save(b, "PNG")
+    b.seek(0)
+    return b
 
 def get_popular_icon(domain):
     result = POPULAR_ICONS.get(domain)
@@ -65,15 +89,12 @@ def get_icon(domain):
     start = time.time()
     logging.info(f"Getting content from {domain}")
 
-    response = requests.get(
-        f"http://{domain}",
-        headers={
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.14; rv:65.0) Gecko/20100101 Firefox/65.0"
-        },
-        timeout=2,
-    )
-    html = BeautifulSoup(response.content, features="html.parser")
+    try:
+        response = get(f"https://{domain}")
+    except:
+        get(f"http://{domain}")
 
+    html = BeautifulSoup(response.content, features="html.parser")
     logging.info(f"Content received {time.time() - start}")
 
     icons = []
@@ -90,7 +111,7 @@ def get_icon(domain):
     if not icons:
         favicon_url = urljoin(response.url, "favicon.ico")
         logging.info(f"Defaulting to favicon url {favicon_url} {time.time() - start}")
-        r = requests.get(favicon_url)
+        r = get(favicon_url)
 
         if r.status_code != 200:
             return
@@ -100,7 +121,7 @@ def get_icon(domain):
             icon_url = urljoin(response.url, icon_url)
 
         logging.info(f"{icon_url} {time.time() - start}")
-        r = requests.get(icon_url)
+        r = get(icon_url)
 
     i = Image.open(BytesIO(r.content))
     i = i.resize((32, 32), resample=Image.BICUBIC)
@@ -121,4 +142,3 @@ def is_valid_hostname(hostname):
         hostname = hostname[:-1]  # strip exactly one dot from the right, if present
     allowed = re.compile("(?!-)[A-Z\d-]{1,63}(?<!-)$", re.IGNORECASE)
     return all(allowed.match(x) for x in hostname.split("."))
-

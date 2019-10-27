@@ -60,7 +60,7 @@ def metaicon(domain):
 
 
 def get_default_image(domain):
-    logging.info('Using "default" image for', domain)
+    logging.info(f'Using "default" image for {domain}')
     m = hashlib.sha256()
     m.update(domain.encode())
     colour = m.hexdigest()[:6]

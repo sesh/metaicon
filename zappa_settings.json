@@ -8,6 +8,7 @@
         "s3_bucket": "zappa-3hjx9xj4s",
         "cors": true,
         "timeout_seconds": 10,
-        "log_level": "INFO"
+        "log_level": "INFO",
+        "memory_size": 192
     }
 }

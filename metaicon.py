@@ -92,7 +92,7 @@ def get_icon(domain):
     try:
         response = get(f"https://{domain}")
     except:
-        get(f"http://{domain}")
+        response = get(f"http://{domain}")
 
     html = BeautifulSoup(response.content, features="html.parser")
     logging.info(f"Content received {time.time() - start}")
